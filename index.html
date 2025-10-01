@@ -114,19 +114,19 @@
         </div>
 
         <div class="control" type="hidden">
-            <label>pas (dt intégration) : <span id="pasval">0.001</span> s</label>
-            <input id="pas" type="range" min="0.0005" max="0.01" step="0.0005" value="0.001">
+            <label type="hidden">pas (dt intégration) : <span id="pasval" type="hidden" >0.001</span> s</label>
+            <input id="pas" type="range" type="hidden" min="0.0005" max="0.01" step="0.0005" value="0.001">
         </div>
 
         <div class="control">
-            <label>Correction corps (offset) : <span id="offsetval">0.8</span> m</label>
+            <label>corps plus haut : <span id="offsetval">0.8</span> m</label>
             <input id="offset" type="range" min="0" max="1.2" step="0.05" value="0.8">
         </div>
     </div>
 
     <div style="margin-top:10px">
-        <button id="run">Exécuter la simulation</button>
-        <button id="auto">Exécuter automatique (EI sweep)</button>
+        <button id="run">Sauter</button>
+        <button id="auto">diff EI</button>
     </div>
 
     <div class="plots">
