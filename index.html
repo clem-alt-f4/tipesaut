@@ -1,1 +1,345 @@
-Html
+<!doctype html>
+<html lang="fr">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Simulation - Saut à la perche (interactive)</title>
+    <script src="https://cdn.plot.ly/plotly-2.24.1.min.js"></script>
+    <style>
+        body {
+            font-family: system-ui, Segoe UI, Roboto, Arial;
+            margin: 18px;
+            color: #111
+        }
+
+        h1 {
+            font-size: 20px
+        }
+
+        .controls {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 10px;
+            max-width: 980px
+        }
+
+        .control {
+            background: #f7f7f7;
+            padding: 8px;
+            border-radius: 6px;
+            border: 1px solid #e1e1e1
+        }
+
+        label {
+            display: block;
+            font-size: 13px;
+            margin-bottom: 6px
+        }
+
+        input[type=range] {
+            width: 100%
+        }
+
+        .plots {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+            margin-top: 14px
+        }
+
+        .plot {
+            flex: 1 1 480px;
+            min-width: 320px;
+            height: 420px
+        }
+
+        button {
+            padding: 8px 12px;
+            border-radius: 6px;
+            border: none;
+            background: #2563eb;
+            color: #fff;
+            cursor: pointer
+        }
+
+        .small {
+            font-size: 12px;
+            color: #444
+        }
+
+        footer {
+            margin-top: 14px;
+            font-size: 12px;
+            color: #666
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Simulation interactive : saut à la perche (modèle simple)</h1>
+    <p class="small">Ajustez les paramètres avec les curseurs puis cliquez sur <em>Exécuter</em>. Le modèle est proche de la simulation Python fournie : intégration d'Euler, deux phases (appui/vol libre). On calcule ici la hauteur franchissable, c'est-à-dire le maximum de la trajectoire <strong>corrigé d'un facteur représentant la capacité du perchiste à cambrer son corps</strong>.</p>
+
+    <div class="controls">
+        <div class="control">
+            <label>L (longueur perche) : <span id="Lval">4.2</span> m</label>
+            <input id="L" type="range" min="1" max="6" step="0.1" value="4.2">
+        </div>
+
+        <div class="control">
+            <label>h (hauteur initiale) : <span id="hval">1.5</span> m</label>
+            <input id="h" type="range" min="0.3" max="3" step="0.05" value="1.5">
+        </div>
+
+        <div class="control">
+            <label>vx0 (vitesse horizontale) : <span id="vx0val">10</span> m/s</label>
+            <input id="vx0" type="range" min="0" max="12" step="0.1" value="10">
+        </div>
+
+        <div class="control">
+            <label>vz0 (vitesse verticale) : <span id="vz0val">1</span> m/s</label>
+            <input id="vz0" type="range" min="-2" max="6" step="0.1" value="1">
+        </div>
+
+        <div class="control">
+            <label>p (profondeur talon) : <span id="pval">0.2</span> m</label>
+            <input id="p" type="range" min="0" max="0.6" step="0.01" value="0.2">
+        </div>
+
+        <div class="control">
+            <label>m (masse) : <span id="mval">77</span> kg</label>
+            <input id="m" type="range" min="40" max="110" step="1" value="77">
+        </div>
+
+        <div class="control">
+            <label>EI (rigidité) : <span id="EIval">2000</span> N·m²</label>
+            <input id="EI" type="range" min="500" max="4000" step="50" value="2000">
+        </div>
+
+        <div class="control">
+            <label>pas (dt intégration) : <span id="pasval">0.001</span> s</label>
+            <input id="pas" type="range" min="0.0005" max="0.01" step="0.0005" value="0.001">
+        </div>
+
+        <div class="control">
+            <label>Correction corps (offset) : <span id="offsetval">0.8</span> m</label>
+            <input id="offset" type="range" min="0" max="1.2" step="0.05" value="0.8">
+        </div>
+    </div>
+
+    <div style="margin-top:10px">
+        <button id="run">Exécuter la simulation</button>
+        <button id="auto">Exécuter automatique (EI sweep)</button>
+    </div>
+
+    <div class="plots">
+        <div id="traj" class="plot"></div>
+        <div id="energie" class="plot"></div>
+    </div>
+
+    <div id="eivals" style="margin-top:10px"></div>
+
+    <footer>Modèle : intégration d'Euler explicite. Phases : appui (force de la perche) puis vol libre. Energie stockée estimée par différence d'énergie mécanique. Hauteur franchissable = hauteur max du centre de masse + correction corps.</footer>
+
+    <script>
+        function $(id) {
+            return document.getElementById(id)
+        }
+        const inputs = ['L', 'h', 'vx0', 'vz0', 'p', 'm', 'EI', 'pas', 'offset']
+        inputs.forEach(id => {
+            const el = $(id);
+            el.addEventListener('input', () => $(id + 'val').innerText = el.value)
+        })
+
+        function simulate(params) {
+            const L = Number(params.L);
+            let h = Number(params.h);
+            let vx0 = Number(params.vx0);
+            let vz0 = Number(params.vz0);
+            const p = Number(params.p);
+            const m = Number(params.m);
+            const EI = Number(params.EI);
+            const pas = Number(params.pas);
+            const g = 9.81;
+
+            let tk = 0;
+            let t = [tk];
+            let xk = -Math.sqrt(Math.max(0, L * L - (h + p) * (h + p)));
+            let zk = h;
+            let x = [xk],
+                z = [zk];
+            let vxk = vx0,
+                vzk = vz0;
+            let vx = [vxk],
+                vz = [vzk];
+            let appui = true;
+            let iter = 0,
+                maxIter = 5e6;
+
+            while (zk > 0 && iter < maxIter) {
+                iter++;
+                if (appui) {
+                    const d = Math.sqrt(xk * xk + (zk + p) * (zk + p));
+                    const coef = (12 * EI / (5 * m * L * L)) * (8 / Math.max(1e-6, d) - 3 / Math.max(1e-6, L));
+                    const axk = coef * xk;
+                    const azk = coef * (zk + p) - g;
+                    vxk += axk * pas;
+                    vzk += azk * pas;
+                    xk += vxk * pas;
+                    zk += vzk * pas;
+                    tk += pas;
+                    t.push(tk);
+                    x.push(xk);
+                    z.push(zk);
+                    vx.push(vxk);
+                    vz.push(vzk);
+                    if (xk * xk + (zk + p) * (zk + p) > L * L) appui = false;
+                } else {
+                    tk += pas;
+                    vzk += -g * pas;
+                    xk += vxk * pas;
+                    zk += vzk * pas;
+                    t.push(tk);
+                    x.push(xk);
+                    z.push(zk);
+                    vx.push(vxk);
+                    vz.push(vzk);
+                }
+            }
+            const Epp = z.map(zi => m * g * Math.max(zi, 0));
+            const Ec = vx.map((vxi, i) => 0.5 * m * (vxi * vxi + vz[i] * vz[i]));
+            const Em = Ec[0] + Epp[0];
+            const Ept = Epp.map((Eppi, i) => Em - Eppi - Ec[i]);
+            return {
+                t,
+                x,
+                z,
+                vx,
+                vz,
+                Epp,
+                Ec,
+                Ept
+            }
+        }
+
+        function plotResult(res, params, titleSuffix = '') {
+            const trajDiv = $('traj');
+            const enDiv = $('energie');
+            const trace = {
+                x: res.x,
+                y: res.z,
+                mode: 'lines',
+                name: 'trajectoire'
+            };
+            const perche = {
+                x: [0, -Math.sqrt(Math.max(0, params.L * params.L - (params.h + params.p) * (params.h + params.p)))],
+                y: [-params.p, params.h],
+                mode: 'lines',
+                line: {
+                    width: 3
+                },
+                name: 'perche'
+            };
+            const ground = {
+                x: [-5, 5],
+                y: [0, 0],
+                mode: 'lines',
+                line: {
+                    width: 6
+                },
+                name: 'sol'
+            };
+
+            Plotly.newPlot(trajDiv, [trace, perche, ground], {
+                title: 'Trajectoire ' + titleSuffix,
+                xaxis: {
+                    title: 'x (m)'
+                },
+                yaxis: {
+                    title: 'z (m)'
+                },
+                yaxis2: {
+                    scaleanchor: 'x',
+                    scaleratio: 1
+                }
+            });
+
+            const t = res.t;
+            const trEpp = {
+                x: t,
+                y: res.Epp,
+                name: 'Epp',
+                mode: 'lines'
+            };
+            const trEc = {
+                x: t,
+                y: res.Ec,
+                name: 'Ec',
+                mode: 'lines'
+            };
+            const trEpt = {
+                x: t,
+                y: res.Ept,
+                name: 'Ept',
+                mode: 'lines'
+            };
+            Plotly.newPlot(enDiv, [trEpp, trEc, trEpt], {
+                title: 'Energies ' + titleSuffix,
+                xaxis: {
+                    title: 't (s)'
+                },
+                yaxis: {
+                    title: 'E (J)'
+                }
+            });
+        }
+
+        $('run').addEventListener('click', () => {
+            const params = {};
+            inputs.forEach(k => params[k] = Number($(k).value));
+            const res = simulate(params);
+            const zmax = Math.max(...res.z);
+            const franchissable = zmax + params.offset;
+            plotResult(res, params);
+            $('eivals').innerHTML = `<b>Hauteur max du centre de masse :</b> ${zmax.toFixed(3)} m<br><b>Hauteur franchissable (avec correction corps) :</b> ${franchissable.toFixed(3)} m — EI=${params.EI} N·m²`;
+        });
+
+        $('auto').addEventListener('click', async () => {
+            const base = {};
+            inputs.forEach(k => base[k] = Number($(k).value));
+            const eis = [];
+            const heights = [];
+            for (let ei = 500; ei <= 4000; ei += 100) {
+                base.EI = ei;
+                const res = simulate(base);
+                const zmax = Math.max(...res.z);
+                heights.push(zmax + base.offset);
+                eis.push(ei);
+                if (ei % 500 === 0) await new Promise(r => setTimeout(r, 10));
+            }
+            const fig = {
+                x: eis,
+                y: heights,
+                type: 'scatter',
+                mode: 'lines+markers',
+                name: 'Hauteur franchissable'
+            };
+            Plotly.newPlot('traj', [fig], {
+                title: 'Hauteur franchissable en fonction de EI',
+                xaxis: {
+                    title: 'EI (N·m²)'
+                },
+                yaxis: {
+                    title: 'Hauteur (m)'
+                }
+            });
+            $('eivals').innerHTML = `<b>Balayage EI terminé — Hauteur franchissable affichée</b>`;
+        });
+
+        document.addEventListener('DOMContentLoaded', () => {
+            $('run').click()
+        });
+    </script>
+</body>
+
+</html>
